@@ -1,11 +1,17 @@
 // Aapo Harjunpää
 // Harjoitustyö - Hotellihuoneen varausohjelma (5p)
 
+
+#define NOMINMAX
+
 // Lisätään tarvittavat kirjastot
 #include <iostream>
 #include <vector>
+#include <cmath>
+#include <sstream>
 #include <string>
 #include <array>
+#include <limits>
 #include <locale>
 #include <chrono>
 #include <thread>
@@ -17,7 +23,7 @@ using namespace this_thread;	// Mahdollistavat ajastuskomennot,
 using namespace chrono;			// kuten sleep_for() -funktion
 
 // Luodaan globaalit vakiomuuttujat
-const int MAX_HUONEET = 300, MIN_HUONEET = 40;
+const int MAKS_HUONEET = 300, MIN_HUONEET = 40;
 
 // Etunimipankin tiedot ovat top 18 nimipalvelu.dvv.fi -sivuston suosituimpien etunimien listalta 2020-vuosikymmenen ajalta
 	// Sukunimet ovat saman sivuston "Yleisimmät sukunimet" -listalta
@@ -41,29 +47,37 @@ struct Hotellihuone {
 	bool varaustila = false;
 	int varausnumero = 1;
 	string varaajan_nimi = "";
-	double hinta = 0;
 	int oidenMaara = 0;
+	int hintaPerYo = 0;
+	double varauksenHinta = 0;
 };
 
 // DEKLAROIDAAN FUNKTIOT
 void paavalikko(vector<Hotellihuone>& huoneet);
 void varaaHuone(vector<Hotellihuone>& hotellihuoneet);
-void valitseHuoneItse(vector<Hotellihuone>& hotellihuoneet);
-void valitseHuoneSatunnaisesti(vector<Hotellihuone>& hotellihuoneet);
-void tutkiVarausta();
+int valitseHuoneItse(vector<Hotellihuone>& hotellihuoneet, int huonetyyppi);
+int valitseViimeinenVapaaHuone(vector<Hotellihuone>& hotellihuoneet, int huoneenKoko);
+void tutkiVarausta(Hotellihuone& huone, int rivinLisays);
 void luoHotellihuoneet(vector<Hotellihuone>& huoneet);
+int satunnainenVarausnumero();
+double varauksenHinta(int oidenMaara, int hintaPerYo);
+double kayttajanVarauksenHinta(int oidenMaara, int hintaPerYo);
 int vapaatHuonetyypit(vector<Hotellihuone>& huoneet, int tyyppi);
+void tulostaVapaatHuoneet(vector<Hotellihuone>& hotellihuoneet, int huoneenKoko, vector<int>& vapaatHuonenumerot);
 void puhekupla();
-void vastaanotto();
+void vastaanottoIloinen();
+void vastaanottoVihainen();
 void dialogi(vector<string> rivit);
 void puhdistaDialogi();
 void odotaVastausta();
 int kaksiVaihtoehtoa(string vaihtoehto1, string vaihtoehto2);
 int kolmeVaihtoehtoa(string vaihtoehto1, string vaihtoehto2, string vaihtoehto3);
 void puhdistaVastaus();
+void alustaTerminaali();
 void sijainti(int x, int y);
 void piilotaKursori();
 void naytaKursori();
+string kayttajanNimi();
 
 int main()
 {
@@ -75,89 +89,459 @@ int main()
 	int huoneiden_maara = 0;
 
 	do {
-		huoneiden_maara = rand() % (MAX_HUONEET - MIN_HUONEET + 1) + MIN_HUONEET;
+		huoneiden_maara = rand() % (MAKS_HUONEET - MIN_HUONEET + 1) + MIN_HUONEET;
 	} while (huoneiden_maara % 2 != 0);
 
 	vector<Hotellihuone> hotellihuoneet(huoneiden_maara);
 	luoHotellihuoneet(hotellihuoneet);
-
-	puhekupla();
-	dialogi({"Tervetuloa aaventen hotelliin!", "" ,"Miten voin olla avuksi?"});
+	
 	paavalikko(hotellihuoneet);
 	
+	dialogi({ "Turvallista kotimatkaa!" });
+
 	return EXIT_SUCCESS;
 }
 
 void paavalikko(vector<Hotellihuone>& huoneet)
 {
-	// TODO:
-	//		Moro! Haluan...
-	//		1. vaihtoehto: varata huoneen
-	//		2. vaihtoehto: tutkia varausta
-	//		3. vaihtoehto: kotiin
-
-	sijainti(5, 14); cout << "Moro! Haluan...";
-
-	int valinta = kolmeVaihtoehtoa("varata huoneen", "tutkia varausta", "kotiin");
-
-	puhdistaVastaus();
-
-	if (valinta == 1)
+	for (int i = 0;;)
 	{
-		varaaHuone(huoneet);
-	}
-	else if (valinta == 2)
-	{
-		tutkiVarausta();
+		// Tavoiteltu ulkoasu päävalikolle:
+		// 
+		//		Moro! Haluan...
+		// 
+		//		>  varata huoneen
+		//		   tutkia varausta
+		//		   kotiin
+		//
+		
+		alustaTerminaali();
+
+		puhekupla();
+		dialogi({ "Tervetuloa aaventen hotelliin!", "" ,"Miten voin olla avuksi?" });
+
+		sijainti(5, 14); cout << "Moro! Haluan...";
+
+		int valinta = kolmeVaihtoehtoa("varata huoneen", "tutkia varausta", "kotiin");
+
+		puhdistaVastaus();
+
+		if (valinta == 1) // Jos käyttäjä haluaa varata huoneen...
+		{
+			varaaHuone(huoneet); //...kutsutaan siihen tarkoitettu aliohjelma
+		}
+		else if (valinta == 2)
+		{
+			dialogi({ "Voitte antaa minulle varausnumeron", "tai varaajan nimen, jos haluat", "tutkia jokaista sillä nimellä tehtyä", "varausta." });
+			int tutkintaValinta = 0;
+			tutkintaValinta = kaksiVaihtoehtoa("Minulla on varausnumero", "Haluan tutkia nimelläni tekemiä varauksia");
+			puhdistaVastaus();
+
+			if (tutkintaValinta == 1)
+			{
+				int varausnroSyote = 0;
+
+				while (true)
+				{
+					dialogi({ "Selvä!", "Anna varausnumero." });
+					naytaKursori();
+					sijainti(5, 14); cout << "Varausnumeroni on...";
+					sijainti(8, 16); cin >> varausnroSyote;
+					puhdistaVastaus();
+					piilotaKursori();
+
+					bool varausLoydetty = false;
+
+					if (cin.fail())
+					{
+						cin.clear(); // Tyhjennä virhetila
+						cin.ignore(numeric_limits<streamsize>::max(), '\n');
+						puhdistaVastaus();
+					}
+					else
+					{
+						for (Hotellihuone huone : huoneet)
+						{
+							if (huone.varaustila == true && huone.varausnumero == varausnroSyote)
+							{
+								varausLoydetty = true;
+								int kiitosValinta = 0;
+								dialogi({ "Aah! Tässä sinun varauksesi." });
+								tutkiVarausta(huone, 0);
+								kiitosValinta = kaksiVaihtoehtoa("Kiitos!", "Kiitos paljon!");
+								puhdistaVastaus();
+								break;
+							}
+						}
+						if (varausLoydetty == true)
+							break;
+						else
+						{
+							dialogi({ "En löytänyt varausta tuolla", "numerolla. Haluatko yrittää", "uudelleen?" });
+							int uudelleenValinta = 0;
+							uudelleenValinta = kaksiVaihtoehtoa("Kyllä", "En");
+							puhdistaVastaus();
+
+							if (uudelleenValinta == 2)
+								break;
+						}
+					}
+				}
+			}
+			else // Käyttäjä haluaa tutkia varauksia nimen perusteella
+			{
+				string nimiSyote = "";
+				cin.clear();
+
+				while (true)
+				{
+					dialogi({ "Antakaa minulle varaajan nimi,", "kiitos."});
+					bool varausLoydetty = false;
+					naytaKursori();
+					sijainti(5, 14); cout << "Varaajan nimi on...";
+					sijainti(8, 16); getline(cin, nimiSyote); // Yritä ottaa käyttäjän syöte
+					puhdistaVastaus();
+
+					if (cin.fail() || nimiSyote.empty()) // Jos syötteessä on virhe tai se on tyhjä
+					{
+						cin.clear(); // Tyhjennä virhetila
+						cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Tyhjennä puskurin sisältö
+						puhdistaVastaus(); // Tyhjennä käyttäjän näkymä
+					}
+					else
+					{
+						piilotaKursori();
+						int riviLisays = 0;
+						for (Hotellihuone huone : huoneet)
+						{
+							if (huone.varaustila == true && huone.varaajan_nimi == nimiSyote)
+							{
+								varausLoydetty = true;
+								tutkiVarausta(huone, riviLisays);
+								riviLisays += 10;
+							}
+						}
+
+						if (varausLoydetty == true)
+						{
+							dialogi({ "Aah! Tässä sinun varauksesi." });
+							int kiitosValinta = 0;
+							kiitosValinta = kaksiVaihtoehtoa("Kiitos!", "Kiitos paljon!");
+							puhdistaVastaus();
+
+							break;
+						}
+						else
+						{
+							dialogi({ "En löytänyt varausta tuolla", "nimellä. Haluatko yrittää", "uudelleen?" });
+							int uudelleenValinta = 0;
+							uudelleenValinta = kaksiVaihtoehtoa("Kyllä", "En");
+							puhdistaVastaus();
+
+							if (uudelleenValinta == 2)
+								break;
+						}
+					}
+				}
+			}
+		}
+		else
+			break;
 	}
 }
 
 void varaaHuone(vector<Hotellihuone>& hotellihuoneet)
 {
+	if (vapaatHuonetyypit(hotellihuoneet, 1) == 0 && vapaatHuonetyypit(hotellihuoneet, 2) == 0)
+	{
+		dialogi({"Meillä ei ole enää vapaita", "huoneita. Pahoittelut."});
+		int selva = 0;
+		selva = kaksiVaihtoehtoa("Selvä", "Asia selvä");
+		return;
+	}
+
 	int huoneenKoko = 1;
 
-	dialogi({"Kuinka monen hengen huonetta etsit?"});
+	dialogi({"Kuinka monen hengen huonetta etsitte?"});
 	
 	sijainti(5, 14); cout << "Etsin...";
 	huoneenKoko = kaksiVaihtoehtoa("yhden hengen huonetta", "kahden hengen huonetta");
 
+	if (vapaatHuonetyypit(hotellihuoneet, huoneenKoko) == 0)
+	{
+		dialogi({ "Valitettavasti meillä ei ole", "enää vapaita " + to_string(huoneenKoko) + ":n hengen huoneita." });
+		int selva = 0;
+		selva = kaksiVaihtoehtoa("Selvä", "Asia selvä");
+		return;
+	}
+
 	puhdistaVastaus();
 
 	dialogi({ "Meillä on " + to_string(vapaatHuonetyypit(hotellihuoneet, huoneenKoko)) + " "
-		+ to_string(huoneenKoko) + ":n hengen huonetta vapaa-", "na.", "", "Haluatko valita huoneen itse?", "", "" });
+		+ to_string(huoneenKoko) + ":n hengen huonetta vapaa-", "na.", "", "Haluatteko valita huoneen itse?", "", "" });
 
 	int valinta = kaksiVaihtoehtoa("Kyllä", "En");
 	puhdistaVastaus();
 
+	int huoneNroSyote = 0;
+
+	//
+
 	if (valinta == 1)
 	{
-		valitseHuoneItse(hotellihuoneet);
+		huoneNroSyote = valitseHuoneItse(hotellihuoneet, huoneenKoko);
 	}
 	else
 	{
-		valitseHuoneSatunnaisesti(hotellihuoneet);
+		huoneNroSyote = valitseViimeinenVapaaHuone(hotellihuoneet, huoneenKoko);
+		int asiaSelv = 0;
+		asiaSelv = kaksiVaihtoehtoa("Selvä", "Asia selvä");
+		puhdistaVastaus();
+	}
+
+	//
+
+	int olikoOikeaNimi = 0;
+	string varaajanNimiSyote = "";
+	cin.clear();
+
+	do {
+		alustaTerminaali();
+		varaajanNimiSyote = kayttajanNimi();
+		dialogi({ varaajanNimiSyote + "?", "Sainko nimen oikein?" });
+		olikoOikeaNimi = kaksiVaihtoehtoa("Kyllä", "Et, nimi on...");
+	} while (olikoOikeaNimi != 1);
+
+
+	puhdistaVastaus();
+	dialogi({"Selvä!", "Kuinka monta yötä haluatte viettää", "hotellissamme?", "Varauksen enimmäispituus on", "365 päivää."});
+
+	int oidenMaaraSyote;
+
+	while (true)
+	{
+		naytaKursori();
+		sijainti(5, 14); cout << "Kuinka monta yötäkö?";
+		sijainti(8, 16); cin >> oidenMaaraSyote;
+		piilotaKursori();
+
+		if (cin.fail() || oidenMaaraSyote < 1 || oidenMaaraSyote > 365)
+		{
+			cin.clear(); // Tyhjennä virhetila
+			cin.ignore(numeric_limits<streamsize>::max(), '\n');
+			puhdistaVastaus();
+		}
+		else break;
+	}
+
+	alustaTerminaali();
+	dialogi({to_string(oidenMaaraSyote) + " yötä siis!", "Odottakaa, kun lasken varauksenne hinnan.", "...", "...", "..."});
+
+	double hinta = kayttajanVarauksenHinta(oidenMaaraSyote, hotellihuoneet[huoneNroSyote-1].hintaPerYo);
+
+	ostringstream hintaStream;
+	hintaStream.precision(2); // Määritetään tarkkuus kahteen desimaaliin
+	hintaStream << fixed << hinta;
+
+	dialogi({ "Varauksen lopullinen hinta on","", hintaStream.str() + " euroa." });
+
+	sleep_for(seconds(2));
+
+	dialogi({ "Oletteko tyytyväinen varaukseenne", "vai haluatteko peruuttaa sen?" });
+	int tyytyvaisyys = kaksiVaihtoehtoa("Olen tyytyväinen", "Haluan perua varauksen");
+	puhdistaVastaus();
+
+	if (tyytyvaisyys == 1)
+	{
+		dialogi({ "Hienoa!", "Maksakaa " + hintaStream.str() + " euroa,", "niin saatte avaimen."});
+		
+		int maksatko = 0;
+		maksatko = kaksiVaihtoehtoa("Tässä " + hintaStream.str() + " euroa, olkaa hyvä", "En halua maksaa");
+		puhdistaVastaus();
+
+		if (maksatko == 1)
+		{
+			while (true)
+			{
+				bool varausnumeroKaytossa = false;
+				int varausnro = 0;
+				varausnro = satunnainenVarausnumero();
+			
+				for (Hotellihuone huone : hotellihuoneet)
+				{
+					if (huone.varaustila == true && huone.varausnumero == varausnro)
+					{
+						varausnumeroKaytossa = true;
+						break;
+					}
+				}
+				if (varausnumeroKaytossa == false)
+				{
+					hotellihuoneet[huoneNroSyote - 1].varaustila = true;
+					hotellihuoneet[huoneNroSyote - 1].varausnumero = varausnro;
+					hotellihuoneet[huoneNroSyote - 1].varaajan_nimi = varaajanNimiSyote;
+					hotellihuoneet[huoneNroSyote - 1].oidenMaara = oidenMaaraSyote;
+					hotellihuoneet[huoneNroSyote - 1].varauksenHinta = hinta;
+
+					break;
+				}
+			}
+
+			dialogi({ "Kiitos varauksestanne!", "", "Tässä vielä varauksesi tiedot."});
+			tutkiVarausta(hotellihuoneet[huoneNroSyote - 1], 0);
+			int varmistus;
+			varmistus = kaksiVaihtoehtoa("Kiitos!", "Kiitos paljon!");
+			alustaTerminaali();
+		}
+		else
+		{
+			vastaanottoVihainen();
+			dialogi({"Ei sitten."});
+			int poistut = 0;
+			poistut = kaksiVaihtoehtoa("Ei niin", "Hmm...");
+			puhdistaVastaus();
+		}
+	}
+	else
+	{
+		dialogi({ "Asia harvinaisen selvä.", "Haluatteko tehdä eri varauksen?" });
+		vastaanottoVihainen();
+		int paatos = kaksiVaihtoehtoa("Kyllä", "En");
+		puhdistaVastaus();
+
+		if (paatos == 1)
+			varaaHuone(hotellihuoneet);
 	}
 }
 
-void valitseHuoneItse(vector<Hotellihuone>& hotellihuoneet)
+int valitseHuoneItse(vector<Hotellihuone>& hotellihuoneet, int huoneenKoko)
 {
 	dialogi({ "Selvä!", "", "Tässä lista vapaista huoneistamme.", "Kerro vain haluamasi huoneen numero ja", "minä hoidan loput!"});
+
+	vector<int> vapaatHuonenumerot;
+
+	int huoneNroSyote;
+
+	while(true)
+	{
+		naytaKursori();
+		tulostaVapaatHuoneet(hotellihuoneet, huoneenKoko, vapaatHuonenumerot);
+
+		sijainti(5, 14); cout << "Haluan huoneen nro...";
+		sijainti(8, 16); cin >> huoneNroSyote;
+		piilotaKursori();
+
+		if (cin.fail() || find(vapaatHuonenumerot.begin(), vapaatHuonenumerot.end(), huoneNroSyote) == vapaatHuonenumerot.end())
+		{
+			cin.clear(); // Tyhjennä virhetila
+			cin.ignore(numeric_limits<streamsize>::max(), '\n');
+			puhdistaVastaus();
+		}
+		else break;
+	}
+
+	alustaTerminaali();
+
+	dialogi({"Asia selvä! Huone " + to_string(huoneNroSyote) + " siis!"});
+	return huoneNroSyote;
 }
 
-void valitseHuoneSatunnaisesti(vector<Hotellihuone>& hotellihuoneet)
+string kayttajanNimi()
 {
+	dialogi({ "Millä nimellä varaus tulee,", "arvon ihminen?", });
 
+	string nimiSyote = "";
+
+	while (true)
+	{
+		naytaKursori();
+		sijainti(5, 14); cout << "Varaus tulee nimellä...";
+		sijainti(8, 16);
+
+		getline(cin, nimiSyote); // Yritä ottaa käyttäjän syöte
+
+		if (cin.fail() || nimiSyote.empty()) // Jos syötteessä on virhe tai se on tyhjä
+		{
+			cin.clear(); // Tyhjennä virhetila
+			cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Tyhjennä puskurin sisältö
+			puhdistaVastaus(); // Tyhjennä käyttäjän näkymä
+		}
+		else break; // Syöte on kunnossa, lopeta silmukka
+	}
+	piilotaKursori();
+	alustaTerminaali();
+
+	return nimiSyote;
 }
 
-void tutkiVarausta()
+void tulostaVapaatHuoneet(vector<Hotellihuone>& hotellihuoneet, int huoneenKoko, vector<int>& vapaatHuonenumerot)
 {
+	int kuinkaMonesHuone = 0, kuinkaMonesRivi = 0, valiLisays = 0;
 
+	for (Hotellihuone huone : hotellihuoneet)
+	{
+		if (huone.huonetyyppi == huoneenKoko && huone.varaustila == false)
+		{
+			vapaatHuonenumerot.push_back(huone.huoneen_numero);
+
+			kuinkaMonesHuone++;
+			sijainti(38 + valiLisays, 12 + kuinkaMonesRivi); cout << huone.huoneen_numero;
+
+			valiLisays += 4;
+
+			if (kuinkaMonesHuone % 10 == 0)
+			{
+				kuinkaMonesRivi++;
+				valiLisays = 0;
+			}
+		}
+	}
+}
+
+int valitseViimeinenVapaaHuone(vector<Hotellihuone>& hotellihuoneet, int huoneenKoko)
+{
+	int huoneNro = 0;
+	for (Hotellihuone huone : hotellihuoneet)
+	{
+		if (huone.huonetyyppi == huoneenKoko && huone.varaustila == false)
+		{
+			huoneNro = huone.huoneen_numero;
+		}
+	}
+
+	alustaTerminaali();
+
+	dialogi({ "Teidän huoneenne numero on ", to_string(huoneNro) });
+	return huoneNro;
+}
+
+void tutkiVarausta(Hotellihuone& huone, int rivinLisays)
+{
+	double hinta = huone.varauksenHinta;
+
+	ostringstream hintaStream;
+	hintaStream.precision(2); // Määritetään tarkkuus kahteen desimaaliin
+	hintaStream << fixed << hinta;
+
+	if (rivinLisays != 0)
+	{
+		sijainti(40, 13);
+		cout << "Kaikki varaukset nimellä";
+	}
+	
+	sijainti(40, 14); cout << huone.varaajan_nimi;
+
+	sijainti(40, 17 + rivinLisays); cout << "Varaus: " << huone.varausnumero;
+	sijainti(40, 19 + rivinLisays); cout << "Huone: " << huone.huoneen_numero << ", tyyppi " << huone.huonetyyppi << "hh";
+	sijainti(40, 20 + rivinLisays); cout << "Öiden määrä: " << huone.oidenMaara;
+	sijainti(40, 21 + rivinLisays); cout << "Hinta: " << hintaStream.str() << " euroa";
 }
 
 void luoHotellihuoneet(vector<Hotellihuone>& huoneet)
 {
 	int huonenumero = 1;
 	vector<string> kaytetytNimet;
+	vector<int> kaytetytVarausnumerot;
 
 	// Käydään läpi kaikki hotellin huoneet ja annetaan jokaiselle satunnaisesti arvotut tiedot
 	for (Hotellihuone& huone : huoneet)
@@ -165,9 +549,15 @@ void luoHotellihuoneet(vector<Hotellihuone>& huoneet)
 		// Annetaan huoneelle numero ja huonetyyppi (1:n tai 2:n hengen huone)
 		huone.huoneen_numero = huonenumero;
 		if (huonenumero <= huoneet.size() / 2)
+		{
 			huone.huonetyyppi = 1;
+			huone.hintaPerYo = 100;
+		}
 		else
+		{
 			huone.huonetyyppi = 2;
+			huone.hintaPerYo = 150;
+		}
 
 		huonenumero++;
 
@@ -189,8 +579,46 @@ void luoHotellihuoneet(vector<Hotellihuone>& huoneet)
 
 			huone.varaajan_nimi = nimi; // Lisätään luotu nimi huoneen varaajan nimeksi
 			kaytetytNimet.push_back(nimi);
+
+			int varausnro = 0;
+			do {
+				varausnro = satunnainenVarausnumero();
+			} while (find(kaytetytVarausnumerot.begin(), kaytetytVarausnumerot.end(), varausnro) != kaytetytVarausnumerot.end());
+
+			huone.varausnumero = varausnro;
+			kaytetytVarausnumerot.push_back(varausnro);
+
+			int oidenMaara = rand() % 28 + 1;
+			huone.oidenMaara = oidenMaara;
+			huone.varauksenHinta = varauksenHinta(oidenMaara, huone.hintaPerYo);
 		}
 	}
+}
+
+int satunnainenVarausnumero()
+{
+	return rand() % (99999 - 10000 + 1) + 10000;
+}
+
+double varauksenHinta(int oidenMaara, int hintaPerYo)
+{
+	int satunnaisLuku = rand() % 3;
+	double lopullinenProsentti = (10 - satunnaisLuku) / 10.0;
+	return lopullinenProsentti * oidenMaara * hintaPerYo;
+}
+
+double kayttajanVarauksenHinta(int oidenMaara, int hintaPerYo)
+{
+	int satunnaisLuku = rand() % 3;
+	double lopullinenProsentti = (10 - satunnaisLuku) / 10.0;
+
+	if (satunnaisLuku != 0)
+	{
+		dialogi({ "Onnittelut!", "Sait varaukseesi " + to_string(satunnaisLuku * 10) + "% alennusta!" });
+		sleep_for(seconds(2));
+	}
+
+	return lopullinenProsentti * oidenMaara * hintaPerYo;
 }
 
 int vapaatHuonetyypit(vector<Hotellihuone>& huoneet, int tyyppi)
@@ -216,15 +644,26 @@ void puhekupla()
 	sijainti(5, 9);  cout << "||                                                _/   ";
 	sijainti(5, 10); cout << "||_______________________________________________/     ";
 
-	vastaanotto();
+	vastaanottoIloinen();
 }
 
-void vastaanotto()
+void vastaanottoIloinen()
 {
 	sijainti(62, 4);  cout << "  @@@@@@@@     ";
 	sijainti(62, 5);  cout << " /      @@@@   ";
 	sijainti(62, 6);  cout << "|  ^  ^   @@   ";
 	sijainti(62, 7);  cout << " \\ '--'   /    ";
+	sijainti(62, 8);  cout << "  =-ooo--=     ";
+	sijainti(62, 9);  cout << " /   0     \\   ";
+	sijainti(62, 10); cout << "|   000     |  ";
+}
+
+void vastaanottoVihainen()
+{
+	sijainti(62, 4);  cout << "  @@@@@@@@     ";
+	sijainti(62, 5);  cout << " / _  _ @@@@   ";
+	sijainti(62, 6);  cout << "|  U  U   @@   ";
+	sijainti(62, 7);  cout << " \\  -     /    ";
 	sijainti(62, 8);  cout << "  =-ooo--=     ";
 	sijainti(62, 9);  cout << " /   0     \\   ";
 	sijainti(62, 10); cout << "|   000     |  ";
@@ -241,9 +680,9 @@ void dialogi(vector<string> rivit)
 			sijainti(10 + i, 4 + j); cout << rivit[j][i];
 
 			if(rivit[j][i] == '.' || rivit[j][i] == '!' || rivit[j][i] == '?')
-				sleep_for(milliseconds(500));
+				sleep_for(milliseconds(200));
 			else
-				sleep_for(milliseconds(30));
+				sleep_for(milliseconds(10));
 		}
 	}
 
@@ -255,12 +694,13 @@ void puhdistaDialogi()
 	for (int i = 4; i <= 9; i++)
 	{
 		sijainti(10, i);
-		cout << "                                        ";
+		cout << string(40,' ');
 	}
 }
 
 void odotaVastausta()
 {
+	while (_kbhit()) _getch();
 	sijainti(5, 15);
 }
 
@@ -347,8 +787,15 @@ void puhdistaVastaus()
 	for (int i = 14; i <= 19; i++)
 	{
 		sijainti(0, i);
-		cout << "                                 ";
+		cout << string(100, ' ');
 	}
+}
+
+void alustaTerminaali()
+{
+	system("cls");
+	puhekupla();
+	vastaanottoIloinen();
 }
 
 // Funktio, joka määrittää tulostettavan tekstin sijainnin
