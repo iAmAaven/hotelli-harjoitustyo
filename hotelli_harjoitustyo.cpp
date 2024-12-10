@@ -333,6 +333,7 @@ void varaaHuone(vector<Hotellihuone>& hotellihuoneet)
 		if (cin.fail() || oidenMaaraSyote < 1 || oidenMaaraSyote > 365)
 		{
 			cin.clear(); // Tyhjennä virhetila
+			cin.ignore(numeric_limits<streamsize>::max(), '\n');
 		}
 		else break;
 	}
